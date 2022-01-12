@@ -1,0 +1,212 @@
+NAME: wiki
+LAST DEPLOYED: Wed Jan 12 08:47:15 2022
+NAMESPACE: wiki
+STATUS: pending-install
+REVISION: 1
+TEST SUITE: None
+USER-SUPPLIED VALUES:
+persistence:
+  enabled: true
+  existingClaim: efs-claim
+
+COMPUTED VALUES:
+image:
+  name: wiki
+  pullPolicy: IfNotPresent
+  repository: baranikannan
+  tag: "1.0"
+ingress:
+  class: nginx
+  host: docs.mydomain.com
+livenessProbe:
+  failureThreshold: 7
+  httpGet:
+    path: /view/health
+  periodSeconds: 30
+  successThreshold: 1
+  timeoutSeconds: 3
+persistence:
+  accessModes:
+  - ReadWriteMany
+  annotations: {}
+  enabled: true
+  existingClaim: efs-claim
+  mountPath: /data
+  selector: {}
+  size: 2Gi
+  subPath: ""
+readinessProbe:
+  failureThreshold: 3
+  httpGet:
+    path: /view/health
+  periodSeconds: 30
+  successThreshold: 1
+  timeoutSeconds: 3
+service:
+  container:
+    limits:
+      cpu: 100m
+      memory: 200Mi
+    port: 8080
+    requests:
+      cpu: 30m
+      memory: 100Mi
+  hpa:
+    targetCpuUtilization: 80
+    targetMemoryUtilization: 80
+  maxReplicas: 5
+  minReplicas: 1
+  name: wiki
+  port: 80
+  type: http
+  version: v1
+startupProbe:
+  failureThreshold: 20
+  httpGet:
+    path: /view/health
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  successThreshold: 1
+  timeoutSeconds: 3
+
+HOOKS:
+MANIFEST:
+---
+# Source: wiki/templates/main.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wiki-account
+  namespace: "wiki"
+---
+# Source: wiki/templates/main.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiki-service
+  namespace: "wiki"
+  labels:
+    app: wiki
+spec:
+  ports:
+    - port: 80
+      name: http
+      targetPort: 8080
+  selector:
+    app: wiki
+---
+# Source: wiki/templates/main.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiki
+  namespace: "wiki"
+  labels:
+    app: wiki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wiki
+  template:
+    metadata:
+      labels:
+        app: wiki
+    spec:
+      containers:
+        - name: wiki
+          image: baranikannan/wiki:1.0
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              subPath: 
+          resources:
+            requests:
+              memory: 100Mi
+              cpu: 30m
+            limits:
+              memory: 200Mi
+              cpu: 100m
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /view/health
+              port: 8080
+              scheme: HTTP
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /view/health
+              port:  8080
+              scheme: HTTP
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 7
+            timeoutSeconds: 3
+          startupProbe:
+            httpGet:
+              path: /view/health
+              port:  8080
+              scheme: HTTP
+            failureThreshold: 20
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 3
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: efs-claim
+---
+# Source: wiki/templates/main.yaml
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wiki-hpa
+  namespace: "wiki"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: wiki
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+# Source: wiki/templates/main.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wiki-ingress
+  namespace: "wiki"  
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: docs.mydomain.com
+    http:
+      paths:
+      - pathType: Prefix
+        backend:
+          service:
+            name: wiki-service
+            port: 
+              number: 80
+        path: /
+
